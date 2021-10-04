@@ -3,12 +3,9 @@ import networkx as nx
 from scipy.spatial import ConvexHull
 from string import ascii_lowercase
 from math import isclose
+from math import trunc
+from math import ceil
 import itertools
-
-##TODO - Go through and use a consistent basis for triangles:
-# X -> Top to Bottom left
-# Y -> Top to Bottom Right
-
 
 class base:
 	def cyclic_perm(self,a):
@@ -48,21 +45,23 @@ class base:
 		return intersected.view(arr1.dtype).reshape(-1, arr1.shape[1])
 
 	def sameFace(self,f1, f2):
-		print("comparing faces") 
 		if f1 is None or f2 is None:
-	#		print("no data")
 			return False
-		f1Basis=[ np.subtract(f1[1],f1[0]) , np.subtract(f1[2],f1[0]) ]
-		N1=np.cross(f1Basis[0],f1Basis[1])	
+			
 		same=False
-		for perm in list(itertools.permutations(f2)):
-			f2Basis=[ np.subtract(perm[1],perm[0]) , np.subtract(perm[2],perm[0]) ]
-			N2=np.cross(f2Basis[0],f2Basis[1])
-#			print("checking")
-#			print(f1)
-#			print(perm)
-			if (N1==N2).all() :
-	#			print("match found")
+		for p in list(itertools.permutations(f2)):
+			acc=0
+			acc+=abs(f1[0][0]-p[0][0])
+			acc+=abs(f1[0][1]-p[0][1])
+			acc+=abs(f1[0][2]-p[0][2])
+			acc+=abs(f1[1][0]-p[1][0])
+			acc+=abs(f1[1][1]-p[1][1])
+			acc+=abs(f1[1][2]-p[1][2])
+			acc+=abs(f1[2][0]-p[2][0])
+			acc+=abs(f1[2][1]-p[2][1])
+			acc+=abs(f1[2][2]-p[2][2])
+
+			if isclose(acc,0) :
 				same=True
 		return same
 
@@ -83,11 +82,9 @@ class StarNet(base):
 			self.net.add_node(nodeID, symGrid = self.IDToGrid(nodeID), glyphGrid=None, face=None, aligned=[False,False,False], SV=[0.0,0.0,0.0])
 								
 	def safeAddEdge(self,a,b):
-#		print("checking symbols: " + str(a) + " and " + str(b) ) 
 		if self.net.has_edge(a,b) or self.net.has_edge(b,a):
 			return True
 		if len(list(self.net.neighbors(a))) < 3 and len(list(self.net.neighbors(b))) < 3:
-#			print("adding edge between " + str(a) + " and " + str(b))
 			self.net.add_edge(a,b)
 			return True
 		else:
@@ -113,38 +110,41 @@ class StarMap(base):
 	def __init__(self):
 		self.target=None
 		self.solution=[]
+		self.interpolationSolution=[]
 	
 		self.sn=StarNet()
 		
 		
 		#Construct Sub-Face grid
 		self.triGrid=[]
-		for i in range(0,8):
-			for j in range (0,i+1):
-				(x,y) = (j,(i-j))
-				self.triGrid.append((x,y))
 		
-		triBasisx=np.array([[1,0]])
-		triBasisy=np.array([[-1,1]])
 		for tri in range(1 , 65):
-			#print(tri)
-			triLevel=int((tri-1)**0.5)
-			index=(tri-(triLevel)**2)
-			up=(not index%2 == 0)
-		
-			if up:
-				t=((triLevel-1)*triBasisx + int(index/2)*triBasisy)
-				br=t+np.array([[1,0]])
-				bl=t+np.array([[0,1]])
-				triFace=[t,br,bl]
-				
-			else:
-				b=triLevel*triBasisx + int(index/2)*triBasisy
-				tr=b-np.array([[1,0]])
-				tl=b-np.array([[0,1]])
-				triFace=[b,tr,tl]
+
+			#Address using a LIO convention
+			level=ceil(tri**0.5)
+			index=tri-(level-1)**2
+			Orientation=index%2
 			
+			#Address using a half-square XYnotO convention
+			NOrientation=1-Orientation
+			HSY=int((index-1)/2)
+			HSX=(level-1)-(HSY+NOrientation)
+		
+			if Orientation==1:
+				t=np.array([[HSX,HSY]])
+				br=np.array([[HSX,HSY+1]])
+				bl=np.array([[HSX+1,HSY]])
+				triFace=[t,br,bl]
+		
+			else:
+				b=np.array([[HSX+1,HSY+1]])
+				tr=np.array([[HSX,HSY+1]])
+				tl=np.array([[HSX+1,HSY]])
+#				triFace=[b,tr,tl] #Assume upside downs rotate
+				triFace=[b,tl,tr] #Assume upside downs flip
+
 			self.triGrid.append(triFace)
+
 	
 	
 		#Construct main pentakisDodecahedron
@@ -183,7 +183,6 @@ class StarMap(base):
 			v[1]=y/mag
 			v[2]=z/mag
 		
-#		print(pentakisDodecahedron)
 		
 		self.vertices = pentakisDodecahedron
 		self.hull=ConvexHull(self.vertices)
@@ -203,12 +202,12 @@ class StarMap(base):
 		
 		#add fixed symbols for subfaces:
 		self.addMinorCartouche('e8','b7',False)
-		self.addMinorCartouche('f8','g8',False)
+		self.addMinorCartouche('f8','h8',False)
 		self.addMinorCartouche('g8','a1',False)
 		self.addMinorCartouche('h8','g4',False)
 		
 		
-	def addMajorCartouche(self,a,b,c,d,e,f,g,h,i,j,k,l,s=None):
+	def addMajorCartouche(self,a,b,c,d,e,f,g,h,i,j,k,l,gl=None):
 		print("adding major cartouche")
 		aID=self.gridToID(a)
 		bID=self.gridToID(b)
@@ -243,12 +242,12 @@ class StarMap(base):
 		self.sn.safeAddEdge(hID,iID)
 		self.sn.safeAddEdge(iID,jID)
 		
-		if s != None:
-			self.addMinorCartouche(s,g,False)
+		if gl != None:
+			self.addMinorCartouche(a,gl,False)
+		self.updateMap()
 		
 		
-	def addMinorCartouche(self,s,g,verbose=True):	
-		#TODO
+	def addMinorCartouche(self,s,g,verbose=True,ignore=False,force=False):	
 		if verbose:
 			print("adding minor cartouche")
 			
@@ -256,32 +255,40 @@ class StarMap(base):
 		newGlyphPair=(s,g)
 		sID=self.gridToID(s)
 		gID=self.gridToID(g)
-
 		oldGlyphPair=None
-		
-		print("new",newGlyphPair)
+
 		
 		for i in self.sn.net.nodes:
 			if self.sn.net.nodes[i]['glyphGrid'] == g:
 				oldGlyphPair=(self.sn.net.nodes[i]['symGrid'],self.sn.net.nodes[i]['glyphGrid'])
 				break
+			if self.sn.net.nodes[i]['symGrid'] == s and self.sn.net.nodes[i]['glyphGrid'] is not None:
+				oldGlyphPair=(self.sn.net.nodes[i]['symGrid'],self.sn.net.nodes[i]['glyphGrid'])
+				break
 				
-		print("old",oldGlyphPair)
+		
+		if oldGlyphPair is not None and oldGlyphPair != newGlyphPair:
+			if ignore:
+				print("Warning: Trying to map symbol-glyph pair" + str(newGlyphPair) + "but it is already mapped to " + str(oldGlyphPair) + ". Please check your coordinate logs are correct")
+				if not force:
+					return
+			else:
+				raise Exception("Error: Trying to map symbol-glyph pair" + str(newGlyphPair) + "but it is already mapped to " + str(oldGlyphPair) + ". Please check your coordinate logs, and your minor cartouche entrries are correct")
 		
 		if oldGlyphPair is None:
 			if verbose:
 				print("adding glyph")
+				print(sID,gID)
 			self.sn.net.nodes[sID]['glyphGrid']=g
-			self.sn.net.nodes[sID]['subFace']=self.triGrid[gID]
+			self.sn.net.nodes[sID]['subFace']=self.triGrid[gID-1]
 			return
 		
 		if oldGlyphPair == newGlyphPair:
 			if verbose:
-				print("This glyph has already been added for this symbol")
+				print("This glyph has already been added for this symbol.")
 			return
 		
-		if oldGlyphPair is not None and oldGlyphPair != newGlyphPair:
-			raise Exception("Error: Trying to map symbol-glyph pair" + str(newGlyphPair) + "but it is already mapped to " + str(oldGlyphPair) + ". Please check your coordinate logs are correct")
+
 
 	
 	
@@ -289,65 +296,79 @@ class StarMap(base):
 	def addStarmappingData(self,symbol,SVx,SVy,SVz):
 		print("Adding Starmapping Data")
 		sID=self.gridToID(symbol)
-		self.sn.net.nodes[sID]['SV']=[SVx,SVy,SVz]
 		i=0
 		bestdp=0
 		bestface=0
 		match=False
+		preexsisting=False
 		for centrum in self.centrums:
 			if self.sn.net.nodes[sID]['face'] != None and not isclose(SVx,centrum[0]) and not isclose(SVy,centrum[1]) and not isclose(SVz,centrum[2]):
-				raise Exception("Starmapping data Error - Symbol: " + symbol + " has already been mapped, and there is a discrepancy with the new data.")
-				break
-#			print("checking face:" + str(i) + " : " + str(centrum) + " against " + str(self.sn.net.nodes[sID]['SV']))
+				oldSV=self.sn.net.nodes[sID]['SV'] 
+				if not isclose(SVx,oldSV[0]) or not isclose(SVy,oldSV[1]) or not isclose(SVz,oldSV[2]):
+					raise Exception("Starmapping data Error - Symbol: " + symbol + " has already been mapped to SV: " + str(self.sn.net.nodes[sID]['SV']) +  " and can't be mapped again to: " + str([SVx,SVy,SVz]))
+					break
+				else:
+					print("Starmapping data already matches with a mapped symbol: " + symbol + ". Nothing new to add here.")
+					return
+					
 			if isclose(SVx,centrum[0]) and isclose(SVy,centrum[1]) and isclose(SVz,centrum[2]) :
-#				print("match found")
 				self.sn.net.nodes[sID]['face']=self.faces[i]
+				self.sn.net.nodes[sID]['SV']=[SVx,SVy,SVz]
 				bestface=i
 				match=True
 				break
 			i+=1
 		
-		if match:
+		if match :
 			print("Starmapping Data successfully added")
-			#print(self.sn.net.nodes[sID])
 			self.updateMap()
 		else:
 			raise Exception("Starmapping data Error - Symbol: " + symbol + " does not fit on the star map. Please check Coordinates." )
+		
+		
 		
 	def updateMap(self,layers=0):
 		#Goes through each node, and checks if any two of the neighboring nodes have mapped positional data. 
 		print("updating starmap with recursion depth: " + str(layers))
 		recurse=False
 		for nodeID in self.sn.net.nodes:
-			if not self.sn.net.nodes[nodeID]['face']: # If node is already mapped to a face, don't do anything.
-				#print("Attempting to fill in data for node: " + str(nodeID) )
-				neighbors=self.sn.net.neighbors(nodeID)
-				mappedNNs=[]
-				for neighbor in neighbors:
-					if self.sn.net.nodes[neighbor]['face'] != None:
-						#print("Mapped nearest neighbor found: " + str(neighbor))
-						mappedNNs.append(self.sn.net.nodes[neighbor]['face'])
-				# If they do, use it to compute positional data of this node.
-				# The two neighbors will share a point. The face to map will share two points with one neighbor and two points with the other.
-				if len(mappedNNs) > 1: 
-					print("Sufficent data to extend map.")
+			neighbors=self.sn.net.neighbors(nodeID)
+			mappedNNs=[]
+			unmappedNNs=[]
+			for neighbor in neighbors:
+				if self.sn.net.nodes[neighbor]['face'] != None:
+					mappedNNs.append(self.sn.net.nodes[neighbor]['face'])
+				else:
+					unmappedNNs.append(self.sn.net.nodes[neighbor]['symGrid'])
+
+
+			if len(mappedNNs) == 2: 
+				print("Sufficent data to extend map around node: " + str(nodeID))
+				if not self.sn.net.nodes[nodeID]['face']: # If THIS node is not mapped to a face, there is now enough datat to map THIS node.	
+					print("Mapping this node.")
 					i=0
-					for face in self.faces:
+					for face in self.faces: # The two mapped neighbors will share a point. The face to map will share two points with one neighbor and two points with the other.
 						if len(self.multidim_intersect(np.array(mappedNNs[0]),np.array(face)))==2 and len(self.multidim_intersect(np.array(mappedNNs[1]),np.array(face)))==2:
 							#Once found, map the starmap face to the node, and add centrum data.
 							print("Position of face: " + str(i) + " maps to symbol " + self.sn.net.nodes[nodeID]['symGrid'])
 							self.sn.net.nodes[nodeID]['face']=face
 							self.sn.net.nodes[nodeID]['SV']=[self.centrums[i][0],self.centrums[i][1],self.centrums[i][2]]
-							#print(self.sn.net.nodes[nodeID])
 							recurse=True
 							break
-						else:
-							pass
-							#print("face didn't match")
 						i+=1
-				else:
-					pass
-					#print("Insufficent data to map. Moving on to next Node.")
+				else: # If this node IS mapped to a face, there is now enough data to map the remaining node.
+					print("Mapping adjacent node.")
+					i=0
+					for face in self.faces: #the one unmapped face will be the only one to share two points with this face, that isn't already mapped. 
+						if len(self.multidim_intersect(np.array(self.sn.net.nodes[nodeID]['face']),np.array(face)))==2 and len(unmappedNNs) == 1 and  not ( self.sameFace(face,mappedNNs[0]) or self.sameFace(face,mappedNNs[1]) ):
+							print("Position of face: " + str(i) + " maps to symbol " + unmappedNNs[0])
+							self.sn.net.nodes[self.gridToID(unmappedNNs[0])]['face']=face
+							self.sn.net.nodes[self.gridToID(unmappedNNs[0])]['SV']=[self.centrums[i][0],self.centrums[i][1],self.centrums[i][2]]
+							recurse=True
+							break
+						i+=1
+					
+					
 		if(recurse):
 			layers+=1
 			self.updateMap(layers)
@@ -362,7 +383,6 @@ class StarMap(base):
 
 	
 	def addCoordinateLog(self,g1,g2,g3,g4,g5,g6,g7,g8,SVx,SVy,SVz):
-		#TODO
 		vector=np.array([[SVx,SVy,SVz]])
 		
 		print("Adding coordinate log")
@@ -380,7 +400,7 @@ class StarMap(base):
 			alignmentVertex=0
 		if g2 == 'f8' and g3 == 'f8' and g4 == 'f8' and g5 == 'f8' and g6 == 'f8' and g7 == 'f8' and g8 == 'f8': #Align to Bottom Right
 			vertexString="Bottom Right"
-			alignmentVertex=1  ##Note this needs to be the other way around
+			alignmentVertex=1 
 		if g2 == 'e8' and g3 == 'e8' and g4 == 'e8' and g5 == 'e8' and g6 == 'e8' and g7 == 'e8' and g8 == 'e8': #Align to Bottom left
 			vertexString="Bottom left"
 			alignmentVertex=2			
@@ -412,6 +432,7 @@ class StarMap(base):
 		for i in allFaces:
 			if self.sameFace(allFaces[i],targetFace):
 				facesymbol=self.sn.net.nodes[i]['symGrid']
+				targetFace=self.sn.net.nodes[i]['face'] # neccisary to get aligned face from net, rather than unalighned face from pentakis dodecahedron
 				targetFaceID=i
 				break
 		
@@ -423,19 +444,19 @@ class StarMap(base):
 		if sum(faceAligned)<2:
 			print("Info: First symbol mapped, but on an unaligned face. There is no point attempting to use this face to determine the symbol arrangment on the subface. Please align this face first:")
 			print("Dial any two of the following addresses with the stargate, and add them as coordinate data.")
-			print(self.solution[0],"e8","e8","e8","e8","e8","e8","e8")
-			print(self.solution[0],"f8","f8","f8","f8","f8","f8","f8")
-			print(self.solution[0],"g8","g8","g8","g8","g8","g8","g8")
+			print(g1,"e8","e8","e8","e8","e8","e8","e8")
+			print(g1,"f8","f8","f8","f8","f8","f8","f8")
+			print(g1,"g8","g8","g8","g8","g8","g8","g8")
 			return
 		
 		#face is aligned. Try to add subface data
 		subfaceSymbols=[g2,g3,g4,g5,g6,g7,g8]
-		glyphSol=self.getGlyphsol(vector,targetFace)
+		glyphSol=self.getGlyphsol(vector,targetFace,True)
 		
 		print("adding glyph data from coordinate log")
 		for i,sym in enumerate(subfaceSymbols):
 			symID=self.gridToID(sym)
-			self.addMinorCartouche(sym,glyphSol[i],True)
+			self.addMinorCartouche(sym,glyphSol[i])
 		
 	def solve(self):
 		
@@ -443,18 +464,18 @@ class StarMap(base):
 		if self.target is None:
 			print("Info: A target vector is unspecified. Please specify one to find a solution.")
 			exit(0)
-		
+		print("attempting to find solution for vector: ",self.target)
 		
 		#First, Find face on the main starmap.
 		targetFace=self.getTargetFace(self.target)
 		targetFaceID=None
 					
 		#Now see if it matches a symbol in the starnet.
-#		print("checking faces for symbol")
 		allFaces=nx.get_node_attributes(self.sn.net,'face')
 		for i in allFaces:
 			if self.sameFace(allFaces[i],targetFace):
 				self.solution.append(self.sn.net.nodes[i]['symGrid'])
+				targetFace=self.sn.net.nodes[i]['face']
 				targetFaceID=i
 				break
 		
@@ -466,7 +487,6 @@ class StarMap(base):
 			
 			
 		faceAligned=self.sn.net.nodes[targetFaceID]['aligned']
-		#print(faceAligned)
 		if sum(faceAligned)<2:
 			print("Info: First simbol found, but on an unaligned face. Solution not possible without more data.")
 			self.suggest()
@@ -474,6 +494,10 @@ class StarMap(base):
 		
 		
 		glyphSol=self.getGlyphsol(self.target,targetFace)
+		interSol=self.getGlyphsol(self.target,targetFace,"interpol")
+		
+		print("glyph Solution is: ", glyphSol)
+		
 		
 		for i,g in enumerate(glyphSol):
 			symbol=g + "*"
@@ -482,6 +506,8 @@ class StarMap(base):
 					symbol=self.IDToGrid(n)
 					break
 			self.solution.append(symbol)
+			self.interpolationSolution.append(interSol[i])
+			
 					
 					
 		incomplete= any('*' in string for string in self.solution)
@@ -497,7 +523,7 @@ class StarMap(base):
 	
 		if len(self.solution)==0:
 			print("To get closer to a solution, try the following:")
-			print("1. Find and add more major Cartouche data. Add data for NEW cartouches containing the following symbols:")
+			print("1. Find and add more major Cartouche data. Add data for NEW cartouches, especially if they contain the following symbols:")
 			for n in self.sn.net.nodes:
 				if self.sn.net.nodes[n]['face'] != None:
 					print(self.IDToGrid(n))
@@ -557,21 +583,50 @@ class StarMap(base):
 				
 
 		pass			
+	
+	#Takes in a face and constructs a basis for it
+	def getFaceBasis(self,f,rightHanded=True):
+		top=f[0]
+		bottomRight=f[1]
+		bottomLeft=f[2]
+		x=np.subtract(bottomLeft,top)
+		y=np.subtract(bottomRight,top)
+		if rightHanded:
+			return [ x , y ]
+		else:
+			return [ y , x ]
 		
-	#Takes in a vector, and a face. The vector is projected through the face. Returns a coordinate in terms of the basis of the face. Basis is determined using first point of the face in array as the origin. Only returns answer if dot product is positive.
-	def interpolate(self,v,f):
-		fBasis=[ np.subtract(f[2],f[0]) , np.subtract(f[1],f[0]) ]
-		N=np.cross(fBasis[0],fBasis[1])
-		print(N,fBasis)
-		print(np.dot(v,N))
-		if np.dot(v,N) > 0:
-			t=(f[0][0]*N[0]+f[0][1]*N[1]+f[0][2]*N[2])/(v[0][0]*N[0]+v[0][1]*N[1]+v[0][2]*N[2])
-			vectorInPlaneStandardBasis=np.subtract(v*t,f[0])
-			invfBasis=np.linalg.pinv(fBasis)
-			vectorInPlanePlaneBasis=np.dot(vectorInPlaneStandardBasis,invfBasis)
+	#Takes in a vector, and a face. The vector is projected through the face. Returns a coordinate in terms of the basis of the face.
+	#Basis is determined using first point of the face in array as the origin. 
+	def interpolate(self,v,f,rightHanded=True):
+		top=f[0]
+		fBasis = [ x , y ] = self.getFaceBasis(f,rightHanded)
+		N=np.cross(x,y)
+		
+		if np.dot(v,N) != 0:
+			t=np.dot(top,N)/np.dot(v,N)
+			vSubTop=np.subtract(v*t,top)
+
+			#From a linear algebra perspective, these really should work, but i'm going with a hand-coded approach because i've tested it more reliably
+			#invfBasis=np.linalg.pinv(fBasis)
+			#vectorInPlanePlaneBasis=np.dot(vectorInPlaneStandardBasis,invfBasis)
+
+			interpolationQuotient=fBasis[0][1]*fBasis[1][0] - fBasis[0][0]*fBasis[1][1]
+			interpX,interpY,zTest = 0.0,0.0,1.1
+			if interpolationQuotient==0:
+				return []
+			else:
+				interpX = ( fBasis[1][0]*vSubTop[0][1]-fBasis[1][1]*vSubTop[0][0] ) / interpolationQuotient
+				interpY = ( fBasis[0][1]*vSubTop[0][0]-fBasis[0][0]*vSubTop[0][1] ) / interpolationQuotient
+				zTest=interpX*fBasis[0][2] + interpY*fBasis[1][2] - vSubTop[0][2]
+
+			if not isclose(zTest,0,abs_tol=1e-09):
+				raise Exception("Error: Something has gone wrong with the face interpolation. The zTest goves a value of " + str(zTest) + " When it should be near zero.")
+			
+			vectorInPlanePlaneBasis = np.array([[interpX,interpY]])
 			return vectorInPlanePlaneBasis
 		else:
-			return None
+			return []
 			
 	def frac_to_oct(self,f, n=8):
 		# store the number before the decimal point
@@ -589,106 +644,96 @@ class StarMap(base):
 			octals.append(str(int_))
 		return float("{:o}.{}".format(whole, "".join(octals)))
 
-	def getGlyphsol(self,vector,face,glyphOut=True):
-		#Now interpolate using a base 8 coordinate system
-		interpolation=self.interpolate(vector,face)
-		octal=[ format(self.frac_to_oct(interpolation[0][0]), '.8f') , format(self.frac_to_oct(interpolation[0][1]), '.8f')  ]
 
-#		print(interpolation)
-	#	print(octal)
-		#form each pair of digits in the octal interpolation into a triagonal coordinate
-		zipCoords=list(map(list,zip(octal[0],octal[1])))
-		zipCoords=zipCoords[2:]
-	#	print(zipCoords)
-		
-		triCords=[]
-		flip=False
-		for i,[u,v] in enumerate(zipCoords): #iterate over each pair
-			
 
-			downface=False
 
-			if i < len(zipCoords)-1:
-			
-				for j in range(1,len(zipCoords)): #look at remaining pairs to see if wee will overflow into downface
-					[nu,nv]=zipCoords[i+j]
-				#	print("current",[u,v],"next",[nu,nv])
-					if flip:
-						[tx,ty]=[7-int(u),7-int(v)]
-						[tnx,tny]=[7-int(nu),7-int(nv)]
-					else:
-						[tx,ty]=[int(u),int(v)]
-						[tnx,tny]=[int(nu),int(nv)]
-						
-					if tnx+tny  > 7 :
-						downface=True
-						break
-					if tnx+tny  < 7 :
-						break
-
-				#	print("partial triCoord",[tx,ty])
-				
-				#upface or downface
-				
-				
-				
-				if downface : #downface
-					triCord=[tx,ty,1]
-					flip=not flip
-				#	print("down")
-					pass
-					
-				else: # upface
-					triCord=[tx,ty,0]
-				#	print("up")
-					pass
-				triCords.append(triCord)
-		#print(triCords)
-		
-		#convert triagonal coordinates into a glyph symbol
-		glyphSol=[]
-		idSol=[]
-		for i,(x,y,u) in enumerate(triCords):
-		#	print(x,y,u)
-			sum=x+y+u
-			id=sum**2 + 2*y + u + 1
-		#	print("i",id)
-			glyphSol.append(self.IDToGrid(id))
-			idSol.append(id)
-		if glyphOut:
-			return glyphSol
-		else:
-			return idSol
 		
 		
 	def getTargetFace(self,vector):
-#		print("running get target face")
-		targetFace=None
+		bestface=[0,None]
 		for face in self.faces:
-			interpolation=self.interpolate(vector,face)
-#			print("checking face: ",face)
-#			print("interpolation: ", interpolation)
-			if interpolation is not None:
-				if interpolation[0][0] >= 0 and interpolation[0][0] < 1 and  interpolation[0][1] >= 0 and  interpolation[0][1] < 1 and (interpolation[0][0] + interpolation[0][1] <= 1): 
-#					print("Target vector passes through face: " + str(face))
-					targetFace=face
-					break
-		if targetFace is None:
-			raise Exception("Error, Target vector does not appear to intersect the Starmap. I don't know how you did this, but you should stop.")
-		#print(targetFace)
+			centrum = self.getCentrum(face)
+			dp=np.dot(vector,centrum)
+			if dp > bestface[0]:
+				bestface=[dp,face]
+
+		targetFace=bestface[1]
 		return targetFace
 		
+	def getGlyphsol(self,vector,face,output="glyph",noflip=True):
+
+		gridScale=8
 		
+		glyphSol=[]
+		idSol=[]
+		triSol=[]
+		subFaceSol=[]
+		interSol=[]
+		
+		subFace=face
+		
+		loop=0
+		
+		while(len(glyphSol)<7):
+			interpol=self.interpolate(vector,subFace)
+			interpol=interpol*gridScale
+
+			interpolTrunc = [[
+								trunc(interpol[0][0]),
+								trunc(interpol[0][1])
+							]]
+			interpolRem=[[ 
+							interpol[0][0]-interpolTrunc[0][0],
+						    interpol[0][1]-interpolTrunc[0][1]
+						]]
+
+			triCoords = (
+							interpolTrunc[0][0],
+							interpolTrunc[0][1],
+							trunc(interpolRem[0][0]+interpolRem[0][1])
+						)
+
+			#Use tricoords to calculate outputs
+			sum=triCoords[0]+triCoords[1]+triCoords[2]
+			id=sum**2 + 2*triCoords[1] + triCoords[2] + 1
+			glyphSol.append(self.IDToGrid(id))
+			idSol.append(id)
+			triSol.append(triCoords)
+			triFace=self.triGrid[id-1]
+			subFaceSol.append(subFace)
+			interSol.append(interpol)
+			
+			#Now calculate the newface from the subface
+			fbasis = np.array(self.getFaceBasis(subFace))
+			newFace=[]
+			for i,point in enumerate(triFace):
+				# np = T + x*fi + y*fj
+				a=subFace[0][0] + (point[0][0]/gridScale)*fbasis[0][0] + (point[0][1]/gridScale)*fbasis[1][0]
+				b=subFace[0][1] + (point[0][0]/gridScale)*fbasis[0][1] + (point[0][1]/gridScale)*fbasis[1][1]
+				c=subFace[0][2] + (point[0][0]/gridScale)*fbasis[0][2] + (point[0][1]/gridScale)*fbasis[1][2]
+				newPoint=np.array([a,b,c])
+
+				newFace.append(newPoint)
+
+			subFace=newFace
+				
+			loop+=1
+
+		#Returns
+		if output == "subFace":
+			return subFaceSol
+		if output == "id":
+			return idSol
+		if output == "tri":
+			return triSol
+		if output == "interpol":
+			return interSol
+		return glyphSol
 		
 		
 	def alignFace(self,faceID,vector,vertex):
-		
-		#print(faceID)
-		
 		face=self.sn.net.nodes[faceID]['face']		
 		aligned=self.sn.net.nodes[faceID]['aligned']
-		
-		#print(face,aligned)
 	
 		distances=[
 			np.linalg.norm(face[0]-np.array(vector)),
@@ -706,16 +751,12 @@ class StarMap(base):
 			aligned[vertex]=True
 			self.sn.net.nodes[faceID]['face']=face
 			self.sn.net.nodes[faceID]['aligned']=aligned
-			#print(face,aligned)
-			
-			
 			return
 		
 		if sum(aligned)==1:
 			if vertex-indexPoint == 0:
 				aligned=[True,True,True]
 				self.sn.net.nodes[faceID]['aligned']=aligned
-				#print(face,aligned)
 				return
 			else:
 				fix=aligned.index(True)
@@ -723,7 +764,6 @@ class StarMap(base):
 				aligned=[True,True,True]
 				self.sn.net.nodes[faceID]['face']=face
 				self.sn.net.nodes[faceID]['aligned']=aligned
-				#print(face,aligned)
 		
 		if sum(aligned)>=2:
 			return		
@@ -743,260 +783,90 @@ class StarMap(base):
 	def flipTri(self,face,n):
 		n=n%3
 		if n==0:
-			return [face[0],[face[2],face[1]]]
+			return [face[0],face[2],face[1]]
 		if n==1:
-			return [face[2],[face[1],face[0]]]
+			return [face[2],face[1],face[0]]
 		if n==2:
-			return [face[1],[face[0],face[2]]]
+			return [face[1],face[0],face[2]]
 		
 		
-		
-		
-		
-		
-		
-####################### CODE DUMP
 
+		
+		
+####################### UNUSED STUFF
 
+#This was an attempt at me being clever using a base-8 conversion of the interpolation to directly map to the triangles. I see no reason why it shouldn't work, but it was a pain to debug, so I went with the simpler approach. 
+	def getGlyphsol2(self,vector,face,output="glyph"):
+		#Now interpolate using a base 8 coordinate system
+		q=7
+		interpolation=self.interpolate(vector,face)
+		octal=[ format(self.frac_to_oct(interpolation[0][0]), '.8f') , format(self.frac_to_oct(interpolation[0][1]), '.8f')  ]
 
-#old version of face alignment code
+		print(interpolation)
+		print(octal)
+		#form each pair of digits in the octal interpolation into a triagonal coordinate
+		zipCoords=list(map(list,zip(octal[0],octal[1])))
+		zipCoords=zipCoords[2:]
+		print(zipCoords)
+		
+		triCords=[]
+		flip=False
+		for i,[u,v] in enumerate(zipCoords): #iterate over each pair
+			downface=False
+			if i < len(zipCoords)-1:
+				for j in range(1,len(zipCoords)): #look at remaining pairs to see if we will overflow into downface
+					[nu,nv]=zipCoords[i+j]
+					print("current",[u,v],"next",[nu,nv])
+					if flip:
+						[tx,ty]=[q-int(u),q-int(v)]
+						[tnx,tny]=[q-int(nu),q-int(nv)]
+					else:
+						[tx,ty]=[int(u),int(v)]
+						[tnx,tny]=[int(nu),int(nv)]
+						
+					print("[tx,ty]",[tx,ty])
+					if tnx+tny  > q :
+						downface=True
+						break
+					if tnx+tny  < q :
+						break
 
-		# #Align to top
-		# if g2 == 'g7' and g3 == 'g7' and g4 == 'g7' and g5 == 'g7' and g6 == 'g7' and g7 == 'g7' and g8 == 'g7':
-			
-			# print("Aligning face for symbol " + g1 + " to Top")
-			# g1ID=self.gridToID(g1)
-			# alignment=self.sn.net.nodes[g1ID]['aligned']
-			
-			# targetFace=None
-			# allFaces=nx.get_node_attributes(self.sn.net,'face')
-			# for i in allFaces:
-				# if self.sn.net.nodes[i]['symGrid'] == g1 :
-					# targetFace=self.sn.net.nodes[i]['face']
-			# if targetFace == None:
-				# print("Warning: There is no face mapped to symbol: " + g1 + ". It is not recommended to try and perform a face alignment on a face that has not yet been mapped, due to numerical precision errors. Instead, please map the face by either using adding starmapping data, or by inputing the coordinate log for the following address, before this one:")
-				# print(g1,"g8","g8","g8","g8","g8","g8","g8")
-				# print("I will continue, but any solution produced is likley to be wrong.")
-				# targetFace=self.getTargetFace(vector)
-				# centrum=getCentrum(targetFace)
-				# self.addStarmappingData(g1,centrum[0],centrum[1],centrum[2])
-			
-			# p1=targetFace[0]
-			# p2=targetFace[1]
-			# p3=targetFace[2]
-			
-			# d1 = np.linalg.norm(p1 - np.array(vector))
-			# d2 = np.linalg.norm(p2 - np.array(vector))
-			# d3 = np.linalg.norm(p3 - np.array(vector))
-			
-
-
-			# newface=None	
-			# if alignment[2] :
-				# if isclose(d1,0):
-					# newface=[p1,p2,p3]
-				# if isclose(d2,0):
-					# newface=[p2,p1,p3]
+					print("partial triCoord",[tx,ty])
+					print("looping")
+				
+				#upface or downface
+				if downface : #downface
+					triCord=[tx,ty,1]
+					flip=not flip
+					print("down")
+					pass
 					
-				# self.sn.net.nodes[g1ID]['aligned'] = [True,alignment[1],alignment[2]]
-				# self.sn.net.nodes[g1ID]['face']=newface	
-				# return
-
-			# if alignment[1] :
-				# if isclose(d3,0):
-					# newface=[p3,p2,p1]			
-				# if isclose(d1,0):
-					# newface=[p1,p2,p3]
-					
-				# self.sn.net.nodes[g1ID]['aligned'] = [True,alignment[0],alignment[2]]
-				# self.sn.net.nodes[g1ID]['face']=newface	
-				# return
-				
-			# if isclose(d1,0,abs_tol=1e-06):
-				# newface=[p1,p2,p3]	
-			# if isclose(d2,0,abs_tol=1e-06):
-				# newface=[p2,p1,p3]
-			# if isclose(d3,0,abs_tol=1e-06):
-				# newface=[p3,p2,p1]
-				
-			# if newface == None:
-				# raise Exception("Coordinate Log data Error - The Top input for face: " + g1 + " does not match any of the possible vertices. Please check the coordinate data is correct.")
-				
-				
-			# self.sn.net.nodes[g1ID]['aligned'] = [True,alignment[1],alignment[2]]
-			# self.sn.net.nodes[g1ID]['face']=newface	
-			# return		
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-			# # if alignment[1] :
-				# # if isclose(d3,0):
-					# # newface=[p3,p2,p1]			
-				# # if isclose(d1,0):
-					# # newface=[p1,p2,p3]
-					
-				# # alignment=self.sn.net.nodes[g1ID]['face']=newface	
-				# # return
-
-			# # if alignment[2] :
-				# # if isclose(d1,0):
-					# # newface=[p1,p2,p3]
-					# # self.sn.net.nodes[g1ID]['aligned'] = [True,alignment[1],alignment[2]]	
-				# # if isclose(d2,0):
-					# # newface=[p2,p1,p3]
-					# # self.sn.net.nodes[g1ID]['aligned'] = [alignment[0],True,alignment[2]]
-					
-				# # alignment=self.sn.net.nodes[g1ID]['face']=newface	
-				# # return
+				else: # upface
+					triCord=[tx,ty,0]
+					print("up")
+					pass
+				triCords.append(triCord)
+		print(triCords)
 		
-		# #Align to Bottom Right
-		# if g2 == 'g6' and g3 == 'g6' and g4 == 'g6' and g5 == 'g6' and g6 == 'g6' and g7 == 'g6' and g8 == 'g6':
-			# print("Aligning face for symbol " + g1 + " to Bottom Right")
-			# g1ID=self.gridToID(g1)
-			# alignment=self.sn.net.nodes[g1ID]['aligned']
-			
-			# targetFace=None
-			# allFaces=nx.get_node_attributes(self.sn.net,'face')
-			# for i in allFaces:
-				# if self.sn.net.nodes[i]['symGrid'] == g1 :
-					# targetFace=self.sn.net.nodes[i]['face']
-			# if targetFace == None:
-				# print("Warning: There is no face mapped to symbol: " + g1 + ". It is not recommended to try and perform a face alignment on a face that has not yet been mapped, due to numerical precision errors. Instead, please map the face by either using adding starmapping data, or by inputing the coordinate log for the following address, before this one:")
-				# print(g1,"g8","g8","g8","g8","g8","g8","g8")
-				# print("I will continue, but any solution produced is likley to be wrong.")
-				# targetFace=self.getTargetFace(vector)
-				# centrum=getCentrum(targetFace)
-				# self.addStarmappingData(g1,centrum[0],centrum[1],centrum[2])
-			
-			# p1=targetFace[0]
-			# p2=targetFace[1]
-			# p3=targetFace[2]
-			
-			# d1 = np.linalg.norm(p1 - np.array(vector))
-			# d2 = np.linalg.norm(p2 - np.array(vector))
-			# d3 = np.linalg.norm(p3 - np.array(vector))
-			
-			# newface=None	
-			# if alignment[0] :
-				# if isclose(d2,0):
-					# newface=[p1,p2,p3]				
-				# if isclose(d3,0):
-					# newface=[p1,p3,p2]	
-					
-				# self.sn.net.nodes[g1ID]['aligned'] = [alignment[0],True,alignment[2]]
-				# self.sn.net.nodes[g1ID]['face']=newface	
-				# return
+		#convert triagonal coordinates into a glyph symbol
+		glyphSol=[]
+		idSol=[]
+		for i,(x,y,u) in enumerate(triCords):
+			print(x,y,u)
+			sum=x+y+u
+			id=sum**2 + 2*y + u + 1
+			print("i",id)
+			glyphSol.append(self.IDToGrid(id))
+			idSol.append(id)
+		if output == "glyph":
+			return glyphSol
+		if output == "id":
+			return idSol
+		if output == "tris":
+			return triCords
 
-			# if alignment[2] :
-				# if isclose(d1,0):
-					# newface=[p2,p1,p3]
-				# if isclose(d2,0):
-					# newface=[p1,p2,p3]
-					
-				# self.sn.net.nodes[g1ID]['aligned'] = [alignment[0],True,alignment[2]]
-				# self.sn.net.nodes[g1ID]['face']=newface	
-				# return
-				
-			# if isclose(d1,0,abs_tol=1e-06):
-				# newface=[p1,p2,p3]	
-			# if isclose(d2,0,abs_tol=1e-06):
-				# newface=[p2,p1,p3]
-			# if isclose(d3,0,abs_tol=1e-06):
-				# newface=[p3,p2,p1]
-				
-				
-				
-				
-				
-				
-				
-			# if newface == None:
-				# raise Exception("Coordinate Log data Error - The bottom right input for face: " + g1 + " does not match any of the possible vertices. Please check the coordinate data is correct.")
-				
-				
-			# self.sn.net.nodes[g1ID]['aligned'] = [alignment[0],True,alignment[2]]
-			# self.sn.net.nodes[g1ID]['face']=newface	
-			# return			
-			
-		# #Align to bottom left
-		# if g2 == 'g5' and g3 == 'g5' and g4 == 'g5' and g5 == 'g5' and g6 == 'g5' and g7 == 'g5' and g8 == 'g5':
-			# print("Aligning face for symbol " + g1 + " to Bottom Left")
-			# g1ID=self.gridToID(g1)
-			# alignment=self.sn.net.nodes[g1ID]['aligned']
-			
-			# targetFace=None
-			# allFaces=nx.get_node_attributes(self.sn.net,'face')
-			# for i in allFaces:
-				# if self.sn.net.nodes[i]['symGrid'] == g1 :
-					# targetFace=self.sn.net.nodes[i]['face']
-			# if targetFace == None:
-				# print("Warning: There is no face mapped to symbol: " + g1 + ". It is not recommended to try and perform a face alignment on a face that has not yet been mapped, due to numerical precision errors. Instead, please map the face by either using adding starmapping data, or by inputing the coordinate log for the following address, before this one:")
-				# print(g1,"g8","g8","g8","g8","g8","g8","g8")
-				# print("I will continue, but any solution produced is likley to be wrong.")
-				# targetFace=self.getTargetFace(vector)
-				# centrum=getCentrum(targetFace)
-				# self.addStarmappingData(g1,centrum[0],centrum[1],centrum[2])
-			
-			
-			# p1=targetFace[0]
-			# p2=targetFace[1]
-			# p3=targetFace[2]
-			
-			# d1 = np.linalg.norm(p1 - np.array(vector))
-			# d2 = np.linalg.norm(p2 - np.array(vector))
-			# d3 = np.linalg.norm(p3 - np.array(vector))
-			
-				
-			# if alignment[0] :
-				# if isclose(d2,0):
-					# newface=[p1,p3,p2]
-					# self.sn.net.nodes[g1ID]['aligned'] = [alignment[0],True,alignment[2]]
-				# if isclose(d3,0):
-					# newface=[p1,p2,p3]	
-					# self.sn.net.nodes[g1ID]['aligned'] = [alignment[0],alignment[1],True]	
-					
-				# alignment=self.sn.net.nodes[g1ID]['face']=newface	
-				# return					
 
-			# if alignment[1] :
-				# if isclose(d1,0):
-					# newface=[p3,p2,p1]
-					# self.sn.net.nodes[g1ID]['aligned'] = [True,alignment[1],alignment[2]]					
-				# if isclose(d3,0):
-					# newface=[p1,p2,p3]
-					# self.sn.net.nodes[g1ID]['aligned'] = [alignment[0],alignment[1],True]	
-					
-				# alignment=self.sn.net.nodes[g1ID]['face']=newface	
-				# return		
-		
-		
-		
-		
-		
+
 		
 		
 		
